@@ -200,7 +200,11 @@ class Phone:
 
     def pick_sound(self, title):
         """On a channel settings screen: Sound -> choose title -> save/back."""
-        if not self.tap_text("Sound", ("TextView",), wait=3):
+        for _ in range(3):  # some channel screens (e.g. Play services) load slowly
+            if self.tap_text("Sound", ("TextView",), wait=3):
+                break
+            time.sleep(2)
+        else:
             return "no 'Sound' row on the channel screen"
         if self.samsung:
             n = self.scroll_to(title, ("CheckedTextView",))
