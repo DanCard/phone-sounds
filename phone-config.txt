@@ -40,9 +40,9 @@ channel | com.google.android.apps.dynamite    | name:Chat and spaces            
 channel | com.google.android.apps.maps        | name:Google location sharing (friends)   | chipmunk Location
 channel | com.google.android.calendar         | name:Calendar notifications              | chipmunk Calendar
 
-# Main phone only (the Pixel keeps Birdsong / Botswana Bushveld).
-default | notification | Cricket                | only:samsung
-default | ringtone     | Cricket                | only:samsung
+# Phone-wide defaults.
+default | notification | Cricket
+default | ringtone     | Cricket
 
 
 manual  | Messenger calls ring with one app-wide tone: Messenger > Menu > Settings > Notifications & sounds > Ringtone > "ring Messenger call"
