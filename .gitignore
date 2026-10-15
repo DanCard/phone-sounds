@@ -1,0 +1,11 @@
+# Private: contact rules with phone numbers
+phone-config.local.txt
+
+# Rebuildable / scratch
+.venv/
+__pycache__/
+sounds/voice_mp3/
+sounds/voice_wav/
+sounds/pitch_test/
+sounds/COMPARISON_*
+sounds/PITCH_LADDER_*

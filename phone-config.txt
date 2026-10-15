@@ -1,0 +1,49 @@
+# What setup-phone.sh applies to a phone. One rule per line, fields split by "|".
+# Lines that don't apply (app not installed, channel not created yet) are
+# reported as PENDING, not errors; re-run after opening/signing in to the app.
+#
+#   enable  | <package>
+#       Turn the app's notifications on (grants POST_NOTIFICATIONS).
+#   channel | <package> | name:<channel name> or id:<channel id> | <sound title>
+#       Give every live channel that matches this notification sound. Match by
+#       NAME where possible: IDs differ per phone and some apps rotate them
+#       (Signal messages_1 -> messages_2, Messenger @<uuid>, Google Voice 1TXT/2TXT,
+#       Google Chat one channel per account). Off channels get turned on.
+#   contact | <phone number, E.164> | <ringtone title>
+#       Per-contact ringtone for regular phone calls.
+#   default | notification or ringtone | <sound title>
+#       Phone-wide default notification sound / ringtone (ringtone also sets SIM 2).
+#   manual  | <text>
+#       Something no script can set; printed as a checklist at the end.
+#
+# Any rule can end with "| only:<text>": it then applies only to phones whose
+# serial, maker or model contains <text> (e.g. only:samsung, only:pixel).
+#
+# PRIVATE rules (contact lines with phone numbers) go in phone-config.local.txt
+# next to this file: same format, git-ignored, read after this file.
+# See phone-config.local.example.txt.
+#
+# Sound titles are file names without extension, from notifications/ (notification
+# sounds) or ringtones/ (ringtones). All of both folders gets pushed.
+
+enable  | com.teslamotors.tesla
+enable  | com.google.android.apps.dynamite
+enable  | com.whatsapp
+
+channel | com.teslamotors.tesla               | id:default_channel                       | chipmunk Tesla
+channel | org.thoughtcrime.securesms          | name:Messages                            | chipmunk Signal
+channel | com.facebook.orca                   | name:Chats                               | chipmunk Messenger
+channel | com.geniecompany.AladdinConnect     | id:832                                   | chipmunk Garage Door
+channel | com.google.android.apps.googlevoice | name:Messages                            | chipmunk SMS
+channel | com.whatsapp                        | name:Message notifications               | chipmunk WhatsApp
+channel | com.google.android.apps.dynamite    | name:Chat and spaces                     | chipmunk Google Chat
+channel | com.google.android.apps.maps        | name:Google location sharing (friends)   | chipmunk Location
+channel | com.google.android.calendar         | name:Calendar notifications              | chipmunk Calendar
+
+# Main phone only (the Pixel keeps Birdsong / Botswana Bushveld).
+default | notification | Cricket                | only:samsung
+default | ringtone     | Cricket                | only:samsung
+
+
+manual  | Messenger calls ring with one app-wide tone: Messenger > Menu > Settings > Notifications & sounds > Ringtone > "ring Messenger call"
+manual  | Signal: if its sound reverts, set it in-app too: Signal > Settings > Notifications > Messages > Sound > "chipmunk Signal"
