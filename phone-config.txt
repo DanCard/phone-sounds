@@ -43,7 +43,7 @@ channel | com.google.android.gms              | id:com.google.android.gms.notifi
 
 # Phone-wide defaults.
 default | notification | Cricket
-default | ringtone     | Cricket
+default | ringtone     | Botswana Bushveld at Dawn
 
 
 manual  | Messenger calls ring with one app-wide tone: Messenger > Menu > Settings > Notifications & sounds > Ringtone > "ring Messenger call"
