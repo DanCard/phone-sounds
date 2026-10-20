@@ -15,7 +15,12 @@ Use .macro (single-macro format), not .mdr (full-backup format).
 
 KNOWN GAP (MacroDroid 6.0.11): the Speak Text action below is silently dropped
 on import. Add it by hand in the editor: Speak Text, text
-"{not_title} says: {lv=short}", tick "Queue text" and "Skip emojis", then save."""
+"{not_title} says: {lv=short}", tick "Queue text" and "Skip emojis", then save.
+After import, check Constraints shows "Priority Mode / Do Not Disturb: In mode:
+Allow All"; if it is missing, add it by hand the same way.
+
+Also grant DND access so the constraint can read the mode:
+  adb shell cmd notification allow_dnd com.arlosoft.macrodroid"""
 import json
 import random
 import sys
@@ -70,6 +75,10 @@ speak = {
     "m_textToSay": "{not_title} says: {lv=short}", "m_waitToFinish": False,
     **common("SpeakTextAction"),
 }
+dnd_off = {  # only run while Do Not Disturb is off ("In mode: Allow All"); TTS ignores DND
+    "m_inMode": True, "m_selectedIndex": 0,
+    **common("PriorityModeConstraint"),
+}
 macro = {
     "macroExportVersion": 1, "globalVariables": [],
     "macro": {
@@ -77,7 +86,7 @@ macro = {
         "forceEvenIfNotEnabledTimestamp": 0, "isActionBlock": False, "isExtra": False,
         "isFavourite": False, "lastEditedTimestamp": 0, "localVariables": [local_var("short")],
         "localVarsAlphabetical": True, "m_GUID": guid(), "m_category": "Uncategorized",
-        "m_constraintList": [], "m_description": "Speak the sender and first %d words of new messages." % WORDS,
+        "m_constraintList": [dnd_off], "m_description": "Speak the sender and first %d words of new messages." % WORDS,
         "m_descriptionOpen": False, "m_enabled": True, "m_excludeLog": False, "m_headingColor": 0,
         "m_isOrCondition": False, "m_name": "Read texts aloud",
         "m_triggerList": [trigger], "m_actionList": [shorten, speak],
