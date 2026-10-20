@@ -15,7 +15,8 @@ Use .macro (single-macro format), not .mdr (full-backup format).
 
 KNOWN GAP (MacroDroid 6.0.11): the Speak Text action below is silently dropped
 on import. Add it by hand in the editor: Speak Text, text
-"{not_title} says: {lv=short}", tick "Queue text" and "Skip emojis", then save.
+"{not_title} says: {lv=short}", drag Pitch and Speed to 100, tick "Queue text"
+and "Skip emojis", then save.
 After import, check Constraints shows "Priority Mode / Do Not Disturb: In mode:
 Allow All"; if it is missing, add it by hand the same way.
 
