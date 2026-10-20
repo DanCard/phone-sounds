@@ -24,7 +24,7 @@ assignment breaks).
 | chipmunk Signal | Signal | `org.thoughtcrime.securesms` | `messages_2` (Fold) | ✅ | (not installed) |
 | chipmunk Messenger | Messenger | `com.facebook.orca` | `messenger_orca_050_messaging@<uuid>` | ✅ | ✅ |
 | chipmunk Garage Door | Genie Aladdin Connect | `com.geniecompany.AladdinConnect` | `832` | ✅ | ✅ |
-| chipmunk SMS | Google Voice | `com.google.android.apps.googlevoice` | `1TXT`, `2TXT` (one per GV number) | ✅ (both) | ✅ (`2TXT`) |
+| chipmunk gvoice text | Google Voice | `com.google.android.apps.googlevoice` | `1TXT`, `2TXT`, `4TXT` (one per GV number) | ✅ | ✅ |
 
 ### Notes / gotchas
 

@@ -34,7 +34,7 @@ channel | com.teslamotors.tesla               | id:default_channel              
 channel | org.thoughtcrime.securesms          | name:Messages                            | chipmunk Signal
 channel | com.facebook.orca                   | name:Chats                               | chipmunk Messenger
 channel | com.geniecompany.AladdinConnect     | id:832                                   | chipmunk Garage Door
-channel | com.google.android.apps.googlevoice | name:Messages                            | chipmunk SMS
+channel | com.google.android.apps.googlevoice | name:Messages                            | chipmunk gvoice text
 channel | com.whatsapp                        | name:Message notifications               | chipmunk WhatsApp
 channel | com.google.android.apps.dynamite    | name:Chat and spaces                     | chipmunk Google Chat
 channel | com.google.android.apps.maps        | name:Google location sharing (friends)   | chipmunk Location
