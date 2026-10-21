@@ -32,6 +32,19 @@ class Phone:
     def sh(self, cmd):
         return self.adb("shell", cmd)
 
+    def snapshot(self, why):
+        """Save a screenshot + UI dump of the current screen for diagnosing a failure."""
+        d = HERE / "debug"
+        d.mkdir(exist_ok=True)
+        stamp = f"{time.strftime('%H%M%S')}-{self.serial}-{re.sub(r'[^A-Za-z0-9]+', '_', why)[:40]}"
+        png = subprocess.run(["adb", "-s", self.serial, "exec-out", "screencap", "-p"],
+                             capture_output=True, stdin=subprocess.DEVNULL).stdout
+        (d / f"{stamp}.png").write_bytes(png)
+        self.sh("uiautomator dump /sdcard/ui.xml")
+        (d / f"{stamp}.xml").write_text(self.sh("cat /sdcard/ui.xml"))
+        focus = re.search(r"mCurrentFocus=.*", self.sh("dumpsys window | grep mCurrentFocus"))
+        print(f"  debug    {why}: saved debug/{stamp}.png/.xml  focus={focus.group(0) if focus else '?'}")
+
     def installed(self, pkg):
         return f"package:{pkg}\n" in self.sh(f"pm list packages {pkg}") + "\n"
 
@@ -187,6 +200,7 @@ class Phone:
     def samsung_set_default(self, label, title):
         self.open_sound_settings()
         if not self.tap_text(label, ("TextView",), wait=3):
+            self.snapshot(f"no {label} row")
             return f"no '{label}' row"
         n = self.scroll_to(title, ("CheckedTextView",), tries=40)
         if not n:
@@ -205,6 +219,7 @@ class Phone:
                 break
             time.sleep(2)
         else:
+            self.snapshot("no Sound row")
             return "no 'Sound' row on the channel screen"
         if self.samsung:
             n = self.scroll_to(title, ("CheckedTextView",))

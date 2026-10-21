@@ -9,3 +9,6 @@ sounds/voice_wav/
 sounds/pitch_test/
 sounds/COMPARISON_*
 sounds/PITCH_LADDER_*
+
+# Failure snapshots from setup_phone.py
+debug/
