@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Apply phone-config.txt to an Android phone over ADB. See setup-phone.sh."""
 import argparse
+from contextlib import contextmanager
+import os
 import re
 import subprocess
 import sys
@@ -9,17 +11,53 @@ import urllib.parse
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+VENV_PY = HERE / ".venv" / "bin" / "python"
+if VENV_PY.exists() and Path(sys.executable).resolve() != VENV_PY.resolve():
+    os.execv(str(VENV_PY), [str(VENV_PY), *sys.argv])
+
+try:
+    import uiautomator2 as u2
+except ImportError:
+    u2 = None
+
 SEP = "-" * 60
+IGNORE_PICKER_TEXTS = {
+    "Save", "My Sounds", "Ringtone volume", "Notification volume",
+    "None", "Sound", "Custom", "Galaxy", "Silent", "Ringtone", "Notification sound"
+}
 
 
 class Phone:
     def __init__(self, serial):
         self.serial = serial
-        self.maker = self.sh("getprop ro.product.manufacturer").strip().lower()
-        self.model = self.sh("getprop ro.product.model").strip()
-        w, h = re.search(r"(\d+)x(\d+)", self.sh("wm size").splitlines()[-1]).groups()
+        info = self.sh("getprop ro.product.manufacturer; echo ===; "
+                       "getprop ro.product.model; echo ===; "
+                       "wm size; echo ===; pm list packages")
+        mfg, model, wmsize, pkgs = info.split("===\n", 3)
+        self.maker = mfg.strip().lower()
+        self.model = model.strip()
+        w, h = re.search(r"(\d+)x(\d+)", wmsize.strip().splitlines()[-1]).groups()
         self.w, self.h = int(w), int(h)
         self.samsung = self.maker == "samsung"
+        self._installed_pkgs = {
+            line[8:].strip() for line in pkgs.splitlines() if line.startswith("package:")
+        }
+        self._media_cache = None
+        self._channels_cache = None
+        self._u2 = None
+
+    @property
+    def u2(self):
+        if self._u2 is None and u2 is not None:
+            self._u2 = u2.connect(self.serial)
+            self._u2.jsonrpc.setConfigurator({
+                "waitForIdleTimeout": 0,
+                "waitForSelectorTimeout": 0,
+                "actionAcknowledgmentTimeout": 50,
+                "scrollAcknowledgmentTimeout": 50,
+                "keyInjectionDelay": 0,
+            })
+        return self._u2
 
     # --- adb -------------------------------------------------------------
     def adb(self, *args, check=False):
@@ -32,6 +70,23 @@ class Phone:
     def sh(self, cmd):
         return self.adb("shell", cmd)
 
+    @contextmanager
+    def fast_ui(self):
+        """Temporarily disable transition/window animations for fast UI automation."""
+        keys = ("window_animation_scale", "transition_animation_scale", "animator_duration_scale")
+        orig = self.sh("; ".join(f"settings get global {k}" for k in keys)).splitlines()
+        saved = [v.strip() if v.strip() not in ("", "null") else "1.0" for v in orig]
+        while len(saved) < 3:
+            saved.append("1.0")
+        self.sh("am force-stop com.android.settings; "
+                "am force-stop com.google.android.soundpicker; " +
+                "; ".join(f"settings put global {k} 0" for k in keys))
+        try:
+            yield
+        finally:
+            restore = "; ".join(f"settings put global {k} {v}" for k, v in zip(keys, saved))
+            self.sh(f"{restore}; input keyevent KEYCODE_HOME")
+
     def snapshot(self, why):
         """Save a screenshot + UI dump of the current screen for diagnosing a failure."""
         d = HERE / "debug"
@@ -40,68 +95,133 @@ class Phone:
         png = subprocess.run(["adb", "-s", self.serial, "exec-out", "screencap", "-p"],
                              capture_output=True, stdin=subprocess.DEVNULL).stdout
         (d / f"{stamp}.png").write_bytes(png)
-        self.sh("uiautomator dump /sdcard/ui.xml")
-        (d / f"{stamp}.xml").write_text(self.sh("cat /sdcard/ui.xml"))
+        xml = self._dump_xml()
+        (d / f"{stamp}.xml").write_text(xml)
         focus = re.search(r"mCurrentFocus=.*", self.sh("dumpsys window | grep mCurrentFocus"))
         print(f"  debug    {why}: saved debug/{stamp}.png/.xml  focus={focus.group(0) if focus else '?'}")
 
     def installed(self, pkg):
-        return f"package:{pkg}\n" in self.sh(f"pm list packages {pkg}") + "\n"
+        return pkg in self._installed_pkgs
 
     # --- media -----------------------------------------------------------
-    def push_folder(self, local, remote):
+    def push_folder(self, local, remote, extra_files=()):
         files = sorted(p for p in (HERE / local).iterdir() if p.suffix in (".ogg", ".mp3", ".m4a", ".wav"))
-        self.sh(f"mkdir -p /sdcard/{remote}")
-        for f in files:
-            self.adb("push", "--sync", str(f), f"/sdcard/{remote}/")
+        by_name = {f.name: f for f in files}
+        for ef in extra_files:
+            by_name.setdefault(ef.name, ef)
+        all_files = [by_name[k] for k in sorted(by_name)]
+
+        # Check which files are already on the phone with identical byte size
+        ls_out = self.sh(f"mkdir -p /sdcard/{remote} && ls -ln /sdcard/{remote}")
+        remote_sizes = {}
+        for line in ls_out.splitlines():
+            m = re.match(r"^-\S+\s+\d+\s+\S+\s+\S+\s+(\d+)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+(.+)$", line.strip())
+            if m:
+                remote_sizes[m.group(2)] = int(m.group(1))
+
+        to_scan = []
+        for f in all_files:
+            if remote_sizes.get(f.name) != f.stat().st_size:
+                self.adb("push", "--sync", str(f), f"/sdcard/{remote}/")
+                to_scan.append(f.name)
+
+        if to_scan:
             # scan_file is what sets is_notification / is_ringtone (see README).
-            self.sh(f"content call --uri content://media --method scan_file "
-                    f"--arg '/storage/emulated/0/{remote}/{f.name}'")
-        return len(files)
+            cmds = [
+                f"content call --uri content://media --method scan_file "
+                f"--arg '/storage/emulated/0/{remote}/{name}' >/dev/null 2>&1"
+                for name in to_scan
+            ]
+            self.sh("; ".join(cmds))
+            self._media_cache = None
+        return len(all_files)
+
+    def _load_media_cache(self):
+        if self._media_cache is not None:
+            return
+        self._media_cache = {}
+        out = self.sh("content query --uri content://media/external/audio/media "
+                      "--projection _id:_display_name:is_notification:is_ringtone")
+        for line in out.splitlines():
+            m = re.search(r"_id=(\d+),\s*_display_name=(.*?),\s*is_notification=(\S+?),\s*is_ringtone=(\S+)", line)
+            if not m:
+                continue
+            mid, dname, is_notif, is_ring = m.groups()
+            stem = dname.rsplit(".", 1)[0]
+            if is_notif in ("1", "true"):
+                self._media_cache[(stem, "notification")] = mid
+            if is_ring in ("1", "true"):
+                self._media_cache[(stem, "ringtone")] = mid
 
     def media_id(self, title, kind="notification"):
         """MediaStore id of a pushed sound; kind picks the Notifications/ or Ringtones/ copy."""
-        out = self.sh("content query --uri content://media/external/audio/media "
-                      f"--projection _id --where \"_display_name LIKE '{title}.%' AND is_{kind}=1\"")
-        m = re.search(r"_id=(\d+)", out)
-        return m.group(1) if m else None
+        self._load_media_cache()
+        return self._media_cache.get((title, kind)) or self._media_cache.get((title, "ringtone"))
 
     # --- notification channels --------------------------------------------
-    def channels(self, pkg):
-        """Live channels of pkg: list of dicts (id, name, importance, sound)."""
+    def invalidate_channels(self):
+        self._channels_cache = None
+
+    def _load_channels_cache(self):
+        if self._channels_cache is not None:
+            return
         dump = self.sh("dumpsys notification --noredact")
-        out, app_on, cur = [], None, None
+        cache = {}
+        cur = None
         for line in dump.splitlines():
             m = re.match(r"\s*AppSettings: (\S+) \(\d+\) importance=(\S+)", line)
             if m:
                 cur = m.group(1)
-                if cur == pkg:
-                    app_on = m.group(2) != "NONE"
+                entry = cache.setdefault(cur, {"channels": [], "seen_ids": set(), "app_on": None})
+                entry["app_on"] = m.group(2) != "NONE"
                 continue
-            if cur != pkg:
+            if not cur:
                 continue
             m = re.search(r"NotificationChannel\{mId='([^']*)', mName=([^,]*),.*?mImportance=(-?\d+),"
                           r".*?mSound=([^,]*),.*?mDeleted=(\w+)", line)
-            if m and m.group(5) == "false" and not any(c["id"] == m.group(1) for c in out):
-                out.append({"id": m.group(1), "name": m.group(2), "importance": int(m.group(3)),
-                            "sound": m.group(4)})
-        return out, app_on
+            if m and m.group(5) == "false":
+                entry = cache[cur]
+                cid = m.group(1)
+                if cid not in entry["seen_ids"]:
+                    entry["seen_ids"].add(cid)
+                    entry["channels"].append({
+                        "id": cid, "name": m.group(2),
+                        "importance": int(m.group(3)), "sound": m.group(4),
+                    })
+        self._channels_cache = cache
+
+    def channels(self, pkg):
+        """Live channels of pkg: list of dicts (id, name, importance, sound)."""
+        self._load_channels_cache()
+        entry = self._channels_cache.get(pkg)
+        if not entry:
+            return [], None
+        return entry["channels"], entry["app_on"]
 
     @staticmethod
     def has_sound(ch, title):
         return f"title={urllib.parse.quote(title)}&" in ch["sound"] + "&"
 
     # --- UI automation ------------------------------------------------------
-    def nodes(self):
+    def _dump_xml(self):
+        if self.u2 is not None:
+            try:
+                return self.u2.jsonrpc.dumpWindowHierarchy(False, 50)
+            except Exception:
+                pass
         self.sh("uiautomator dump /sdcard/ui.xml")
-        xml = self.sh("cat /sdcard/ui.xml")
+        return self.sh("cat /sdcard/ui.xml")
+
+    def nodes(self):
+        xml = self._dump_xml()
         res = []
         for n in re.findall(r"<node [^>]*>", xml):
             g = lambda k: (re.search(k + r'="([^"]*)"', n) or [None, ""])[1]
             b = list(map(int, re.findall(r"\d+", g("bounds"))))
-            res.append({"text": (g("text") or g("content-desc")).replace("&amp;", "&"),
-                        "cls": g("class").split(".")[-1], "checked": g("checked") == "true",
-                        "checkable": g("checkable") == "true", "b": b})
+            if len(b) == 4:
+                res.append({"text": (g("text") or g("content-desc")).replace("&amp;", "&"),
+                            "cls": g("class").split(".")[-1], "checked": g("checked") == "true",
+                            "checkable": g("checkable") == "true", "b": b})
         return res
 
     def find(self, text, cls=None, nodes=None):
@@ -110,61 +230,104 @@ class Phone:
                 return n
         return None
 
+    def wait_for(self, text, cls=None, timeout=3.5):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            n = self.find(text, cls)
+            if n:
+                return n
+            time.sleep(0.06)
+        return None
+
     def tap(self, n):
         b = n["b"]
-        self.sh(f"input tap {(b[0] + b[2]) // 2} {(b[1] + b[3]) // 2}")
+        cx, cy = (b[0] + b[2]) // 2, (b[1] + b[3]) // 2
+        if self.u2 is not None:
+            try:
+                self.u2.click(cx, cy)
+                return
+            except Exception:
+                pass
+        self.sh(f"input tap {cx} {cy}")
 
-    def tap_text(self, text, cls=None, wait=2.5):
-        n = self.find(text, cls)
+    def tap_text(self, text, cls=None, wait=0.25, timeout=3.0):
+        n = self.wait_for(text, cls, timeout=timeout) if timeout > 0 else self.find(text, cls)
         if not n:
             return False
         self.tap(n)
-        time.sleep(wait)
+        if wait > 0:
+            time.sleep(wait)
         return True
 
-    def scroll_to(self, text, cls=None, tries=25):
-        """Scroll down in small steps until text is fully on screen and still.
-
-        Pickers open scrolled to the current selection (Samsung puts the
-        Custom section at the TOP), so first scroll all the way up."""
+    def scroll_to(self, text, cls=None, tries=18):
+        """Scroll directly toward text using alphabetical order of sound rows."""
         x = self.w * 6 // 10
-        prev = None
-        for _ in range(40):
-            if self.find(text, cls):
-                break
-            for _ in range(4):
-                self.sh(f"input swipe {x} {self.h * 2 // 5} {x} {self.h * 3 // 4} 150")
-            time.sleep(1)
-            top = [(n["text"], n["b"][1]) for n in self.nodes() if n["text"]][:8]
-            if top == prev:
-                break
-            prev = top
+        target_low = text.lower()
+
+        if self.samsung:
+            # On Samsung, Custom sounds are at the very top above Galaxy sounds.
+            ns = self.nodes()
+            n = self.find(text, cls, ns)
+            if n and self.h * 0.12 < n["b"][1] and n["b"][3] < self.h * 0.92:
+                return n
+            prev = None
+            for _ in range(5):
+                if self.find(text, cls, ns) or self.find("Custom", nodes=ns) or self.find("Silent", nodes=ns):
+                    break
+                self.sh(f"input swipe {x} {self.h * 1 // 4} {x} {self.h * 4 // 5} 180")
+                time.sleep(0.3)
+                ns = self.nodes()
+                top = [(m["text"], m["b"][1]) for m in ns if m["text"]][:4]
+                if top == prev:
+                    break
+                prev = top
+
+        direction = 1  # 1 = scroll down (swipe up), -1 = scroll up (swipe down)
+        prev_sig = None
         for _ in range(tries):
             ns = self.nodes()
             n = self.find(text, cls, ns)
-            if n and n["b"][3] < self.h * 0.92:
-                time.sleep(1)  # a fling may still be moving the list: wait until stable
-                again = self.find(text, cls)
-                if again and again["b"] == n["b"]:
-                    return n
-                continue
-            self.sh(f"input swipe {x} {self.h * 3 // 4} {x} {self.h * 2 // 5} 700")
-            time.sleep(1)
+            if n and self.h * 0.12 < n["b"][1] and n["b"][3] < self.h * 0.92:
+                return n
+            if not self.samsung:
+                items = [
+                    m["text"] for m in ns
+                    if (cls is None or m["cls"] in cls)
+                    and m["text"] and m["text"] not in IGNORE_PICKER_TEXTS
+                    and not m["text"].startswith("Default (")
+                    and not m["text"].endswith(" available")
+                    and self.h * 0.15 < m["b"][1] < self.h * 0.90
+                ]
+                if items:
+                    if target_low < items[0].lower():
+                        direction = -1
+                    elif target_low > items[-1].lower():
+                        direction = 1
+                sig = tuple(items[:4])
+                if sig and sig == prev_sig:
+                    direction = -direction
+                prev_sig = sig
+            if direction == 1:
+                self.sh(f"input swipe {x} {self.h * 3 // 4} {x} {self.h * 1 // 4} 280")
+            else:
+                self.sh(f"input swipe {x} {self.h * 1 // 4} {x} {self.h * 3 // 4} 280")
+            time.sleep(0.32)
         return None
 
-    def key(self, k, wait=1.5):
+    def key(self, k, wait=0.4):
         self.sh(f"input keyevent {k}")
-        time.sleep(wait)
+        if wait > 0:
+            time.sleep(wait)
 
-    def open_channel(self, pkg, cid):
-        # Start clean: a leftover Settings/picker screen would otherwise be
-        # brought to the front instead of the channel we asked for.
-        for p in ("com.android.settings", "com.google.android.soundpicker"):
-            self.sh(f"am force-stop {p}")
-        self.sh("am start -a android.settings.CHANNEL_NOTIFICATION_SETTINGS "
+    def open_channel(self, pkg, cid, reset_picker=False):
+        # Reset com.android.settings so the requested channel opens cleanly;
+        # keep com.google.android.soundpicker warm unless recovering from an error.
+        stop = "am force-stop com.android.settings; "
+        if reset_picker:
+            stop += "am force-stop com.google.android.soundpicker; "
+        self.sh(f"{stop}am start -a android.settings.CHANNEL_NOTIFICATION_SETTINGS "
                 f"--es android.provider.extra.APP_PACKAGE {pkg} "
                 f"--es android.provider.extra.CHANNEL_ID '{cid}'")
-        time.sleep(3)
 
     def turn_on_switch_near(self, labels):
         ns = self.nodes()
@@ -176,14 +339,13 @@ class Phone:
                 if n["cls"] == "Switch" and n["b"][1] < row["b"][3] and n["b"][3] > row["b"][1]:
                     if not n["checked"]:
                         self.tap(n)
-                        time.sleep(2)
+                        time.sleep(0.4)
                     return True
         return False
 
     def open_sound_settings(self):
-        self.sh("am force-stop com.android.settings")
-        self.sh("am start -a android.settings.SOUND_SETTINGS")
-        time.sleep(3)
+        self.sh("am force-stop com.android.settings; am start -a android.settings.SOUND_SETTINGS")
+        self.wait_for("Ringtone", ("TextView",), timeout=3.0)
 
     def samsung_default_summary(self, label):
         """Text under 'Ringtone' / 'Notification sound' in Sounds and vibration."""
@@ -192,33 +354,29 @@ class Phone:
         for i, n in enumerate(ns):
             if n["text"] == label and n["cls"] == "TextView":
                 nxt = [m for m in ns[i + 1:] if m["cls"] == "TextView"]
-                self.key("KEYCODE_HOME", 1)
+                self.key("KEYCODE_HOME", 0.3)
                 return nxt[0]["text"] if nxt else ""
-        self.key("KEYCODE_HOME", 1)
+        self.key("KEYCODE_HOME", 0.3)
         return ""
 
     def samsung_set_default(self, label, title):
         self.open_sound_settings()
-        if not self.tap_text(label, ("TextView",), wait=3):
+        if not self.tap_text(label, ("TextView",), wait=0.4, timeout=3.0):
             self.snapshot(f"no {label} row")
             return f"no '{label}' row"
-        n = self.scroll_to(title, ("CheckedTextView",), tries=40)
+        n = self.scroll_to(title, ("CheckedTextView",), tries=25)
         if not n:
-            self.key("KEYCODE_HOME", 1)
+            self.key("KEYCODE_HOME", 0.3)
             return f"'{title}' not in the list"
         self.tap(n)
-        time.sleep(1.5)
-        self.key("KEYCODE_BACK", 2)
-        self.key("KEYCODE_HOME", 1)
+        time.sleep(0.4)
+        self.key("KEYCODE_BACK", 0.6)
+        self.key("KEYCODE_HOME", 0.3)
         return None
 
     def pick_sound(self, title):
         """On a channel settings screen: Sound -> choose title -> save/back."""
-        for _ in range(3):  # some channel screens (e.g. Play services) load slowly
-            if self.tap_text("Sound", ("TextView",), wait=3):
-                break
-            time.sleep(2)
-        else:
+        if not self.tap_text("Sound", ("TextView",), wait=0.25, timeout=4.0):
             self.snapshot("no Sound row")
             return "no 'Sound' row on the channel screen"
         if self.samsung:
@@ -227,30 +385,34 @@ class Phone:
                 self.key("KEYCODE_BACK")
                 return f"'{title}' not in the sound list"
             self.tap(n)
-            time.sleep(1.5)
-            self.key("KEYCODE_BACK", 2.5)  # Samsung saves on leaving the picker
+            time.sleep(0.4)
+            self.key("KEYCODE_BACK", 0.6)  # Samsung saves on leaving the picker
         else:  # Pixel / Google sound picker
-            self.tap_text("My Sounds", wait=3)
+            if not self.tap_text("My Sounds", wait=0.25, timeout=3.5):
+                if not self.find("Save", ("Button",)):
+                    self.snapshot("no My Sounds")
+                    return "no 'My Sounds' row in sound picker"
             n = self.scroll_to(title, ("TextView",))
             if not n:
-                self.key("KEYCODE_BACK")
-                self.key("KEYCODE_BACK")
+                self.sh("am force-stop com.google.android.soundpicker")
                 return f"'{title}' not in My Sounds"
             # The selected row's description becomes "Sound, <title>"; confirm before saving.
             for _ in range(3):
                 self.tap(n)
-                time.sleep(1.5)
-                if self.find(f"Sound, {title}", ("LinearLayout",)):
+                time.sleep(0.25)
+                ns = self.nodes()
+                if self.find(f"Sound, {title}", ("LinearLayout",), ns):
                     break
-                n = self.scroll_to(title, ("TextView",)) or n
+                n = self.find(title, ("TextView",), ns) or n
             else:
-                self.key("KEYCODE_BACK")
-                self.key("KEYCODE_BACK")
+                self.sh("am force-stop com.google.android.soundpicker")
                 return f"could not select '{title}'"
-            if not self.tap_text("Save", ("Button",), wait=2.5):
+            save_btn = self.find("Save", ("Button",), ns) or self.wait_for("Save", ("Button",), timeout=1.5)
+            if not save_btn:
+                self.sh("am force-stop com.google.android.soundpicker")
                 return "no Save button in the picker"
-            if self.find("Save", ("Button",)):  # picker still open
-                self.key("KEYCODE_BACK")
+            self.tap(save_btn)
+            time.sleep(0.35)
         return None
 
 
@@ -292,8 +454,11 @@ def main():
     # 1. sound files
     if step("push") and not a.no_push and not a.dry_run:
         print(SEP + "\nPushing sounds")
+        notif_chips = sorted((HERE / "notifications").glob("chipmunk *.ogg"))
         print(f"  notifications: {ph.push_folder('notifications', 'Notifications')} files")
-        print(f"  ringtones:     {ph.push_folder('ringtones', 'Ringtones')} files")
+        # Also include chipmunk notification clips in Ringtones so channels with
+        # USAGE_NOTIFICATION_RINGTONE (e.g. Facebook) list them in the picker.
+        print(f"  ringtones:     {ph.push_folder('ringtones', 'Ringtones', extra_files=notif_chips)} files")
 
     # 2. app-level notifications on
     if step("enable"):
@@ -312,6 +477,7 @@ def main():
             print(f"  {'would enable' if a.dry_run else 'enable'}   {pkg}")
             if not a.dry_run:
                 ph.sh(f"pm grant {pkg} android.permission.POST_NOTIFICATIONS")
+                ph.invalidate_channels()
                 if ph.channels(pkg)[1] is False:
                     failed.append(f"{pkg}: still blocked; turn on in Settings > Apps > {pkg} > Notifications")
 
@@ -362,77 +528,90 @@ def main():
         for ln, kind, f in rules:
             if kind != "contact":
                 continue
-            num, title = f
-            out = ph.sh(f"content query --uri content://com.android.contacts/phone_lookup/"
-                        f"{urllib.parse.quote(num)} --projection _id:display_name:custom_ringtone")
-            m = re.search(r"_id=(\d+), display_name=(.*?), custom_ringtone=(\S+?),", out)
-            if not m:
-                pending.append(f"contact {num}: no contact with this number")
+            who, title = f
+            if who.startswith("+") or who[:1].isdigit():
+                out = ph.sh(f"content query --uri content://com.android.contacts/phone_lookup/"
+                            f"{urllib.parse.quote(who)} --projection _id:display_name:custom_ringtone")
+            else:
+                q = who.replace("'", "''")
+                out = ph.sh("content query --uri content://com.android.contacts/contacts "
+                            f"--projection _id:display_name:custom_ringtone --where \"display_name='{q}'\"")
+            rows = list(dict.fromkeys(re.findall(r"_id=(\d+), display_name=(.*?), custom_ringtone=([^\s,]+)", out)))
+            if not rows:
+                pending.append(f"contact {who}: no matching contact")
                 continue
-            cid, name, cur = m.groups()
             mid = ph.media_id(title, "ringtone")
             if not mid:
-                failed.append(f"contact {name}: ringtone '{title}' not on phone (push first)")
+                failed.append(f"contact {who}: ringtone '{title}' not on phone (push first)")
                 continue
             uri = f"content://media/external/audio/media/{mid}"
-            if cur == uri:
-                print(f"  ok       {name} -> {title}")
-                continue
-            print(f"  {'would set' if a.dry_run else 'set'}      {name} -> {title}")
-            if not a.dry_run:
-                ph.sh(f"content update --uri content://com.android.contacts/contacts/{cid} "
-                      f"--bind custom_ringtone:s:{uri.replace(':', chr(92) + ':', 1)}")
+            for cid, name, cur in rows:
+                label = f"{name} (#{cid})" if len(rows) > 1 else name
+                if cur == uri:
+                    print(f"  ok       {label} -> {title}")
+                    continue
+                print(f"  {'would set' if a.dry_run else 'set'}      {label} -> {title}")
+                if not a.dry_run:
+                    esc = uri.replace(":", r"\:", 1)
+                    res = ph.sh(f"content update --uri content://com.android.contacts/contacts/{cid} "
+                                f"--bind 'custom_ringtone:s:{esc}'")
+                    if "ERROR" in res:
+                        failed.append(f"contact {label}: {res.strip().splitlines()[-1]}")
 
     # 5. channel sounds (UI automation)
     if step("channel"):
         print(SEP + "\nNotification channel sounds")
-        for ln, kind, f in rules:
-            if kind != "channel":
-                continue
-            pkg, match, title = f
-            mkey, mval = match.split(":", 1)
-            if not ph.installed(pkg):
-                pending.append(f"{pkg}: not installed")
-                continue
-            if not ph.media_id(title):
-                failed.append(f"{pkg}: sound '{title}' not on phone (push first)")
-                continue
-            done_ids = set()
-            for _round in range(3):  # re-check: some apps (Signal) replace the channel on change
-                chans, _ = ph.channels(pkg)
-                todo = [c for c in chans if c[mkey] == mval]
-                if not todo:
-                    if not done_ids:
-                        pending.append(f"{pkg} [{match}]: channel not created yet; open the app, "
-                                       f"sign in or wait for a notification, then re-run")
-                    break
-                todo = [c for c in todo if not ph.has_sound(c, title) or c["importance"] == 0]
-                if not todo:
-                    for c in chans:
-                        if c[mkey] == mval and c["id"] not in done_ids:
-                            print(f"  ok       {pkg} [{c['name']}] {c['id']} -> {title}")
-                    break
-                for c in todo:
-                    label = f"{pkg} [{c['name']}] {c['id']}"
-                    if a.dry_run:
-                        print(f"  would set {label} -> {title}" + ("  (+turn on)" if c["importance"] == 0 else ""))
+        from contextlib import nullcontext
+        ctx = nullcontext() if a.dry_run else ph.fast_ui()
+        with ctx:
+            for ln, kind, f in rules:
+                if kind != "channel":
+                    continue
+                pkg, match, title = f
+                mkey, mval = match.split(":", 1)
+                if not ph.installed(pkg):
+                    pending.append(f"{pkg}: not installed")
+                    continue
+                if not ph.media_id(title):
+                    failed.append(f"{pkg}: sound '{title}' not on phone (push first)")
+                    continue
+                done_ids = set()
+                for _round in range(4):  # up to 3 attempts + 1 post-check
+                    chans, _ = ph.channels(pkg)
+                    todo = [c for c in chans if c[mkey] == mval]
+                    if not todo:
+                        if not done_ids:
+                            pending.append(f"{pkg} [{match}]: channel not created yet; open the app, "
+                                           f"sign in or wait for a notification, then re-run")
+                        break
+                    todo = [c for c in todo if not ph.has_sound(c, title) or c["importance"] == 0]
+                    if not todo:
+                        for c in chans:
+                            if c[mkey] == mval and c["id"] not in done_ids:
+                                print(f"  ok       {pkg} [{c['name']}] {c['id']} -> {title}")
+                        break
+                    if _round == 3:
+                        failed.append(f"{pkg} [{match}]: sound keeps reverting")
+                        break
+                    for c in todo:
+                        label = f"{pkg} [{c['name']}] {c['id']}"
+                        if a.dry_run:
+                            print(f"  would set {label} -> {title}" + ("  (+turn on)" if c["importance"] == 0 else ""))
+                            done_ids.add(c["id"])
+                            continue
+                        print(f"  set      {label} -> {title}", flush=True)
+                        ph.open_channel(pkg, c["id"], reset_picker=(_round > 0))
+                        if c["importance"] == 0:
+                            ph.turn_on_switch_near(["Allow notifications", "Show notifications"])
+                        err = ph.pick_sound(title)
+                        if err and _round == 2:
+                            failed.append(f"{label}: {err}")
                         done_ids.add(c["id"])
-                        continue
-                    print(f"  set      {label} -> {title}")
-                    ph.open_channel(pkg, c["id"])
-                    if c["importance"] == 0:
-                        ph.turn_on_switch_near(["Allow notifications", "Show notifications"])
-                    err = ph.pick_sound(title)
-                    ph.key("KEYCODE_HOME", 1)
-                    if err:
-                        failed.append(f"{label}: {err}")
-                    done_ids.add(c["id"])
-                if a.dry_run:
-                    break
-                time.sleep(2)
-            else:
-                failed.append(f"{pkg} [{match}]: sound keeps reverting")
+                    if a.dry_run:
+                        break
+                    ph.invalidate_channels()
         if not a.dry_run:  # final verification
+            ph.invalidate_channels()
             for ln, kind, f in rules:
                 if kind == "channel" and ph.installed(f[0]):
                     mkey, mval = f[1].split(":", 1)

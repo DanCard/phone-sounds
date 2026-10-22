@@ -1,5 +1,6 @@
-# Copy to phone-config.local.txt (git-ignored) and fill in real numbers.
+# Copy to phone-config.local.txt (git-ignored) and fill in contact names or real numbers.
 # Same format as phone-config.txt; meant for anything private.
-#   contact | <phone number, E.164> | <ringtone title> [| only:<serial/maker/model>]
-contact | +15555550101 | ring Mom is calling
-contact | +15555550102 | ring Sophia is calling
+#   contact | <contact name or E.164 phone number> | <ringtone title> [| only:<serial/maker/model>]
+contact | Grandma | ring Mom is calling
+contact | Sophia  | ring Sophia is calling
+contact | Denken  | ring Denken is calling

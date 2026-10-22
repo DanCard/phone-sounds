@@ -9,8 +9,10 @@
 #       NAME where possible: IDs differ per phone and some apps rotate them
 #       (Signal messages_1 -> messages_2, Messenger @<uuid>, Google Voice 1TXT/2TXT,
 #       Google Chat one channel per account). Off channels get turned on.
-#   contact | <phone number, E.164> | <ringtone title>
-#       Per-contact ringtone for regular phone calls.
+#   contact | <contact name or E.164 phone number> | <ringtone title>
+#       Per-contact ringtone for regular phone calls. Matching by contact name
+#       sets the ringtone on every contact entry with that name (handy when
+#       SIM cards/numbers change).
 #   default | notification or ringtone | <sound title>
 #       Phone-wide default notification sound / ringtone (ringtone also sets SIM 2).
 #   manual  | <text>
@@ -29,6 +31,7 @@
 enable  | com.teslamotors.tesla
 enable  | com.google.android.apps.dynamite
 enable  | com.whatsapp
+enable  | com.facebook.katana
 
 channel | com.teslamotors.tesla               | id:default_channel                       | chipmunk Tesla
 channel | org.thoughtcrime.securesms          | name:Messages                            | chipmunk Signal
@@ -41,11 +44,35 @@ channel | com.google.android.apps.maps        | name:Google location sharing (fr
 channel | com.google.android.calendar         | name:Calendar notifications              | chipmunk Calendar
 channel | com.google.android.gms              | id:com.google.android.gms.notifications::SECURITY_ALERTS | chipmunk Security Alert
 channel | com.google.android.gms               | id:com.google.android.gms.notifications::SIGN_IN_PROMPTS | chipmunk New sign in
+channel | com.facebook.katana                 | name:Device-level notifications          | chipmunk Facebook
+channel | com.facebook.katana                 | name:Other notifications                 | chipmunk Facebook        | only:pixel
+channel | com.facebook.katana                 | name:Comments                            | chipmunk Interaction     | only:pixel
+channel | com.facebook.katana                 | name:Tags                                | chipmunk Interaction     | only:pixel
+channel | com.facebook.katana                 | name:More activity about you             | chipmunk Interaction     | only:pixel
+channel | com.facebook.katana                 | name:Friend requests                     | chipmunk Social          | only:pixel
+channel | com.facebook.katana                 | name:Updates from friends                | chipmunk Social          | only:pixel
+channel | com.facebook.katana                 | name:People you may know                 | chipmunk Social          | only:pixel
+channel | com.facebook.katana                 | name:Birthdays                           | chipmunk Social          | only:pixel
+channel | com.facebook.katana                 | name:Memories                            | chipmunk Social          | only:pixel
+channel | com.facebook.katana                 | name:Groups                              | chipmunk Community       | only:pixel
+channel | com.facebook.katana                 | name:Marketplace                         | chipmunk Community       | only:pixel
+channel | com.facebook.katana                 | name:Events                              | chipmunk Community       | only:pixel
+channel | com.facebook.katana                 | name:Pages you follow                    | chipmunk Community       | only:pixel
+channel | com.facebook.katana                 | name:Pages you manage                    | chipmunk Community       | only:pixel
+channel | com.facebook.katana                 | name:Messaging                           | chipmunk Messaging       | only:pixel
+channel | com.facebook.katana                 | name:Dating                              | chipmunk Dating          | only:pixel
+channel | com.facebook.katana                 | name:Reels                               | chipmunk Media           | only:pixel
+channel | com.facebook.katana                 | name:Stages                              | chipmunk Media           | only:pixel
+channel | com.facebook.katana                 | name:Your Account                        | chipmunk Alert           | only:pixel
+channel | com.facebook.katana                 | name:Reminders                           | chipmunk Alert           | only:pixel
+channel | com.facebook.katana                 | name:Missed call reminder                | chipmunk Alert           | only:pixel
+channel | com.facebook.katana                 | name:Fundraisers and crises              | chipmunk Alert           | only:pixel
 
 # Phone-wide defaults.
 default | notification | Cricket
 default | ringtone     | Botswana Bushveld at Dawn
 
 
+manual  | Google Voice: set Menu > Settings > Calls > Making and receiving calls > "Use carrier only" (so incoming calls ring via the carrier Phone app and play per-contact ringtones)
 manual  | Messenger calls ring with one app-wide tone: Messenger > Menu > Settings > Notifications & sounds > Ringtone > "ring Messenger call"
 manual  | Signal: if its sound reverts, set it in-app too: Signal > Settings > Notifications > Messages > Sound > "chipmunk Signal"

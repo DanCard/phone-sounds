@@ -16,4 +16,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 if [[ "${1:-}" == "--list" || -z "${1:-}" ]]; then adb devices -l; exit 0; fi
-exec python3 -I setup_phone.py "$@"
+if [[ -x .venv/bin/python ]]; then
+  exec .venv/bin/python setup_phone.py "$@"
+else
+  exec python3 -I setup_phone.py "$@"
+fi

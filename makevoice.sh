@@ -102,7 +102,9 @@ push_one () { # <serial> <localfile> <destdir>
 push_dev () { # <serial>
   local s="$1" m; m=$(adb -s "$s" shell getprop ro.product.model | tr -d '\r')
   local what=()
-  [[ -n "$OUT_N" ]] && { push_one "$s" "$OUT_N" "Notifications"; what+=("notification"); }
+  # Some apps (e.g. Facebook) flag notification channels as USAGE_NOTIFICATION_RINGTONE,
+  # making the system picker filter for is_ringtone=1; push notification clips to both.
+  [[ -n "$OUT_N" ]] && { push_one "$s" "$OUT_N" "Notifications"; push_one "$s" "$OUT_N" "Ringtones"; what+=("notification"); }
   [[ -n "$OUT_R" ]] && { push_one "$s" "$OUT_R" "Ringtones";     what+=("ringtone"); }
   echo "pushed to $m ($s): ${what[*]}"
 }
