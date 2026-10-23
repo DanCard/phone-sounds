@@ -76,3 +76,4 @@ default | ringtone     | Botswana Bushveld at Dawn
 manual  | Google Voice: set Menu > Settings > Calls > Making and receiving calls > "Use carrier only" (so incoming calls ring via the carrier Phone app and play per-contact ringtones)
 manual  | Messenger calls ring with one app-wide tone: Messenger > Menu > Settings > Notifications & sounds > Ringtone > "ring Messenger call"
 manual  | Signal: if its sound reverts, set it in-app too: Signal > Settings > Notifications > Messages > Sound > "chipmunk Signal"
+manual  | Samsung Modes and Routines DND: in Sleep > Turn on automatically > Sleep schedule (10:00 PM - 8:00 AM), check Mon-Fri ("Weekdays" wake-up mornings = Sun-Thu nights); in Weekend sleep > Time period (11:00 PM - 8:00 AM), check Fri-Sat (Fri-Sat start nights) | only:samsung
