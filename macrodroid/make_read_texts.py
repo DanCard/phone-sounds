@@ -26,16 +26,18 @@ import json
 import random
 import sys
 
-APPS = [  # (label, package)
-    ("Voice", "com.google.android.apps.googlevoice"),
-    ("Messages", "com.google.android.apps.messaging"),
-    ("Messages", "com.samsung.android.messaging"),
-    ("WhatsApp", "com.whatsapp"),
+CHAT_APPS = [  # (label, package) — read aloud all notifications with sound
     ("Messenger", "com.facebook.orca"),
     ("Signal", "org.thoughtcrime.securesms"),
     ("Chat", "com.google.android.apps.dynamite"),
     ("Facebook", "com.facebook.katana"),
 ]
+SMS_APPS = [  # (label, package) — read aloud only when from Denken or Sophia
+    ("Voice", "com.google.android.apps.googlevoice"),
+    ("Messages", "com.google.android.apps.messaging"),
+    ("Messages", "com.samsung.android.messaging"),
+]
+SMS_ALLOWED_TITLE_REGEX = r"^(?i)\s*(Denken|Sophia(\s+Cardenas)?)\s*$"
 WORDS = 6
 
 
@@ -55,13 +57,23 @@ def common(cls):
             "m_constraintList": [], "m_isDisabled": False, "m_isOrCondition": False}
 
 
-trigger = {
+chat_trigger = {
     "enableRegex": False, "ignoreCase": True,
-    "m_applicationNameList": [a for a, _ in APPS], "m_packageNameList": [p for _, p in APPS],
+    "m_applicationNameList": [a for a, _ in CHAT_APPS], "m_packageNameList": [p for _, p in CHAT_APPS],
     "m_exactMatch": False, "m_excludeApps": False, "m_excludes": False,
-    "m_ignoreOngoing": True, "m_option": 0, "m_soundOption": 0, "m_supressMultiples": True,
+    "m_ignoreOngoing": True, "m_option": 0, "m_soundOption": 1, "m_supressMultiples": True,
     "m_textContent": "", "matchOptionMessage": 0, "matchOptionTitle": 0,
     "separateTitleAndMessage": False,
+    **common("NotificationTrigger"),
+}
+sms_trigger = {
+    "enableRegex": True, "ignoreCase": True,
+    "m_applicationNameList": [a for a, _ in SMS_APPS], "m_packageNameList": [p for _, p in SMS_APPS],
+    "m_exactMatch": False, "m_excludeApps": False, "m_excludes": False,
+    "m_ignoreOngoing": True, "m_option": 0, "m_soundOption": 1, "m_supressMultiples": True,
+    "m_textContent": "", "matchOptionMessage": 0, "matchOptionTitle": 1,
+    "messageContent": "", "separateTitleAndMessage": True,
+    "titleContent": SMS_ALLOWED_TITLE_REGEX,
     **common("NotificationTrigger"),
 }
 shorten = {  # first WORDS words of the message body -> local var "short"
@@ -92,7 +104,7 @@ macro = {
         "m_constraintList": [dnd_off], "m_description": "Speak the sender and first %d words of new messages." % WORDS,
         "m_descriptionOpen": False, "m_enabled": True, "m_excludeLog": False, "m_headingColor": 0,
         "m_isOrCondition": False, "m_name": "Read texts aloud",
-        "m_triggerList": [trigger], "m_actionList": [shorten, speak],
+        "m_triggerList": [chat_trigger, sms_trigger], "m_actionList": [shorten, speak],
     },
 }
 json.dump(macro, open(sys.argv[1] if len(sys.argv) > 1 else "Read texts aloud.macro", "w"), indent=1)
