@@ -274,7 +274,7 @@ class Phone:
             for _ in range(5):
                 if self.find(text, cls, ns) or self.find("Custom", nodes=ns) or self.find("Silent", nodes=ns):
                     break
-                self.sh(f"input swipe {x} {self.h * 1 // 4} {x} {self.h * 4 // 5} 180")
+                self.sh(f"input swipe {x} {self.h * 2 // 5} {x} {self.h * 4 // 5} 180")
                 time.sleep(0.3)
                 ns = self.nodes()
                 top = [(m["text"], m["b"][1]) for m in ns if m["text"]][:4]
@@ -488,27 +488,42 @@ def main():
             if kind != "default":
                 continue
             what, title = f
-            mid = ph.media_id(title, what)
-            if not mid:
+            is_silent = title.lower() in ("none", "silent")
+            mid = None if is_silent else ph.media_id(title, what)
+            if not is_silent and not mid:
                 failed.append(f"default {what}: '{title}' not on phone (push first)")
                 continue
             if ph.samsung:
                 # Samsung restores these settings from its own *_CONSTANT_PATH copies,
                 # so `settings put` doesn't stick; go through Sounds and vibration.
                 label = "Notification sound" if what == "notification" else "Ringtone"
+                sam_title = "Silent" if is_silent else title
                 cur = ph.samsung_default_summary(label)
-                if cur.endswith(title):
-                    print(f"  ok       {label} -> {title}")
+                if cur.endswith(sam_title):
+                    print(f"  ok       {label} -> {sam_title}")
                     continue
-                print(f"  {'would set' if a.dry_run else 'set'}      {label} -> {title}  (was: {cur})")
+                print(f"  {'would set' if a.dry_run else 'set'}      {label} -> {sam_title}  (was: {cur})")
                 if not a.dry_run:
-                    err = ph.samsung_set_default(label, title)
-                    if err or not ph.samsung_default_summary(label).endswith(title):
+                    err = ph.samsung_set_default(label, sam_title)
+                    if err or not ph.samsung_default_summary(label).endswith(sam_title):
                         failed.append(f"default {label}: {err or 'did not stick'}; "
                                       f"Settings > Sounds and vibration > {label}")
                 continue
-            uri = f"content://media/external/audio/media/{mid}"
             keys = ["notification_sound"] if what == "notification" else ["ringtone", "ringtone_2"]
+            if is_silent:
+                for key in keys:
+                    cur = ph.sh(f"settings get system {key}").strip()
+                    if cur == "null":
+                        if key != "ringtone_2":
+                            print(f"  ok       {key} -> None")
+                        continue
+                    print(f"  {'would set' if a.dry_run else 'set'}      {key} -> None")
+                    if not a.dry_run:
+                        ph.sh(f"settings delete system {key}")
+                        if ph.sh(f"settings get system {key}").strip() != "null":
+                            failed.append(f"default {key}: could not set to None; Settings > Sounds > {what}")
+                continue
+            uri = f"content://media/external/audio/media/{mid}"
             for key in keys:
                 cur = ph.sh(f"settings get system {key}").strip()
                 if key == "ringtone_2" and cur == "null":
@@ -525,10 +540,9 @@ def main():
     # 4. contact ringtones
     if step("contact"):
         print(SEP + "\nContact ringtones")
-        for ln, kind, f in rules:
-            if kind != "contact":
-                continue
-            who, title = f
+        contact_rules = [(ln, f[0], f[1]) for ln, kind, f in rules if kind == "contact"]
+        explicit_cids = set()
+        for ln, who, title in [r for r in contact_rules if r[1] != "*"]:
             if who.startswith("+") or who[:1].isdigit():
                 out = ph.sh(f"content query --uri content://com.android.contacts/phone_lookup/"
                             f"{urllib.parse.quote(who)} --projection _id:display_name:custom_ringtone")
@@ -546,6 +560,7 @@ def main():
                 continue
             uri = f"content://media/external/audio/media/{mid}"
             for cid, name, cur in rows:
+                explicit_cids.add(cid)
                 label = f"{name} (#{cid})" if len(rows) > 1 else name
                 if cur == uri:
                     print(f"  ok       {label} -> {title}")
@@ -557,6 +572,31 @@ def main():
                                 f"--bind 'custom_ringtone:s:{esc}'")
                     if "ERROR" in res:
                         failed.append(f"contact {label}: {res.strip().splitlines()[-1]}")
+
+        for ln, who, title in [r for r in contact_rules if r[1] == "*"]:
+            mid = ph.media_id(title, "ringtone")
+            if not mid:
+                failed.append(f"contact *: ringtone '{title}' not on phone (push first)")
+                continue
+            uri = f"content://media/external/audio/media/{mid}"
+            out = ph.sh("content query --uri content://com.android.contacts/contacts "
+                        "--projection _id:custom_ringtone")
+            rows = [
+                (cid, cur) for cid, cur in re.findall(r"_id=(\d+), custom_ringtone=([^\s,]+)", out)
+                if cid not in explicit_cids
+            ]
+            todo = [cid for cid, cur in rows if cur != uri]
+            if not todo:
+                print(f"  ok       * ({len(rows)} contacts) -> {title}")
+                continue
+            print(f"  {'would set' if a.dry_run else 'set'}      * ({len(todo)}/{len(rows)} contacts) -> {title}")
+            if not a.dry_run:
+                esc = uri.replace(":", r"\:", 1)
+                where = f" --where \"_id NOT IN ({','.join(sorted(explicit_cids))})\"" if explicit_cids else ""
+                res = ph.sh(f"content update --uri content://com.android.contacts/contacts "
+                            f"--bind 'custom_ringtone:s:{esc}'{where}")
+                if "ERROR" in res:
+                    failed.append(f"contact *: {res.strip().splitlines()[-1]}")
 
     # 5. channel sounds (UI automation)
     if step("channel"):

@@ -9,12 +9,14 @@
 #       NAME where possible: IDs differ per phone and some apps rotate them
 #       (Signal messages_1 -> messages_2, Messenger @<uuid>, Google Voice 1TXT/2TXT,
 #       Google Chat one channel per account). Off channels get turned on.
-#   contact | <contact name or E.164 phone number> | <ringtone title>
+#   contact | <contact name, E.164 phone number, or *> | <ringtone title>
 #       Per-contact ringtone for regular phone calls. Matching by contact name
 #       sets the ringtone on every contact entry with that name (handy when
-#       SIM cards/numbers change).
-#   default | notification or ringtone | <sound title>
-#       Phone-wide default notification sound / ringtone (ringtone also sets SIM 2).
+#       SIM cards/numbers change). "*" sets a fallback ringtone on all contacts
+#       not matched by a specific contact rule.
+#   default | notification or ringtone | <sound title or None>
+#       Phone-wide default notification sound / ringtone (ringtone also sets SIM 2;
+#       "None" or "Silent" silences the default so unknown callers do not ring).
 #   manual  | <text>
 #       Something no script can set; printed as a checklist at the end.
 #
@@ -67,12 +69,15 @@ channel | com.facebook.katana                 | name:Reminders                  
 channel | com.facebook.katana                 | name:Missed call reminder                | chipmunk Alert           | only:pixel
 channel | com.facebook.katana                 | name:Fundraisers and crises              | chipmunk Alert           | only:pixel
 
-# Phone-wide defaults.
+# Phone-wide defaults (ringtone is None/Silent so unknown numbers don't ring;
+# all contacts get "Botswana Bushveld at Dawn" unless overridden in phone-config.local.txt).
 default | notification | Cricket
-default | ringtone     | Botswana Bushveld at Dawn
+default | ringtone     | None
+contact | *            | Botswana Bushveld at Dawn
 
 
 manual  | Google Voice: set Menu > Settings > Calls > Making and receiving calls > "Use carrier only" (so incoming calls ring via the carrier Phone app and play per-contact ringtones)
 manual  | Messenger calls ring with one app-wide tone: Messenger > Menu > Settings > Notifications & sounds > Ringtone > "ring Messenger call"
 manual  | Signal: if its sound reverts, set it in-app too: Signal > Settings > Notifications > Messages > Sound > "chipmunk Signal"
+manual  | Pixel Call Screen: Phone > Settings > Call Screen > turn on "Automatic Call Screen" and select "Maximum protection (Screen unknown numbers & decline spam)" | only:pixel
 manual  | Samsung Modes and Routines DND: in Sleep > Turn on automatically > Sleep schedule (10:00 PM - 8:00 AM), check Mon-Fri ("Weekdays" wake-up mornings = Sun-Thu nights); in Weekend sleep > Time period (11:00 PM - 8:00 AM), check Fri-Sat (Fri-Sat start nights) | only:samsung
