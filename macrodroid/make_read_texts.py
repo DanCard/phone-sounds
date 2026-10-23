@@ -15,7 +15,7 @@ Use .macro (single-macro format), not .mdr (full-backup format).
 
 KNOWN GAP (MacroDroid 6.0.11): the Speak Text action below is silently dropped
 on import. Add it by hand in the editor: Speak Text, text
-"{not_title} says: {lv=short}", drag Pitch and Speed to 100, tick "Queue text"
+"{not_title} says: {lv=short}", drag Pitch to 100 and Speed to 75, tick "Queue text"
 and "Skip emojis", then save.
 After import, check Constraints shows "Priority Mode / Do Not Disturb: In mode:
 Allow All"; if it is missing, add it by hand the same way.
@@ -34,8 +34,9 @@ APPS = [  # (label, package)
     ("Messenger", "com.facebook.orca"),
     ("Signal", "org.thoughtcrime.securesms"),
     ("Chat", "com.google.android.apps.dynamite"),
+    ("Facebook", "com.facebook.katana"),
 ]
-WORDS = 5
+WORDS = 6
 
 
 def guid():
@@ -71,8 +72,9 @@ shorten = {  # first WORDS words of the message body -> local var "short"
     **common("TextManipulationAction"),
 }
 speak = {
-    "m_audioStream": 0, "m_locale": "", "m_pitch": 1.0, "m_queue": True,
-    "m_readNumbersIndividually": False, "m_specifyAudioStream": False, "m_speed": 1.0,
+    "m_audioStream": 0, "m_pitch": 2.0, "m_queue": True,
+    "m_readNumbersIndividually": False, "m_skipEmojis": True,
+    "m_specifyAudioStream": False, "m_speed": 1.5,
     "m_textToSay": "{not_title} says: {lv=short}", "m_waitToFinish": False,
     **common("SpeakTextAction"),
 }

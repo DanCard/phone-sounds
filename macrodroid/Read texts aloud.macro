@@ -33,14 +33,14 @@
    }
   ],
   "localVarsAlphabetical": true,
-  "m_GUID": 5714302272258288428,
+  "m_GUID": 1338832714353643570,
   "m_category": "Uncategorized",
   "m_constraintList": [
    {
     "m_inMode": true,
     "m_selectedIndex": 0,
     "disableLogging": false,
-    "m_SIGUID": 2619974047294211900,
+    "m_SIGUID": 2147314314127463528,
     "m_classType": "PriorityModeConstraint",
     "m_comment": "",
     "m_constraintList": [],
@@ -48,7 +48,7 @@
     "m_isOrCondition": false
    }
   ],
-  "m_description": "Speak the sender and first 5 words of new messages.",
+  "m_description": "Speak the sender and first 6 words of new messages.",
   "m_descriptionOpen": false,
   "m_enabled": true,
   "m_excludeLog": false,
@@ -66,7 +66,8 @@
      "WhatsApp",
      "Messenger",
      "Signal",
-     "Chat"
+     "Chat",
+     "Facebook"
     ],
     "m_packageNameList": [
      "com.google.android.apps.googlevoice",
@@ -75,7 +76,8 @@
      "com.whatsapp",
      "com.facebook.orca",
      "org.thoughtcrime.securesms",
-     "com.google.android.apps.dynamite"
+     "com.google.android.apps.dynamite",
+     "com.facebook.katana"
     ],
     "m_exactMatch": false,
     "m_excludeApps": false,
@@ -89,7 +91,7 @@
     "matchOptionTitle": 0,
     "separateTitleAndMessage": false,
     "disableLogging": false,
-    "m_SIGUID": -6941732356097787918,
+    "m_SIGUID": 4963819593721604191,
     "m_classType": "NotificationTrigger",
     "m_comment": "",
     "m_constraintList": [],
@@ -104,7 +106,7 @@
     "m_textManipulation": {
      "type": "ExtractTextManipulation",
      "params": [
-      "^\\S+(\\s+\\S+){0,4}",
+      "^\\S+(\\s+\\S+){0,5}",
       "0"
      ]
     },
@@ -129,7 +131,7 @@
     },
     "variableName": "short",
     "disableLogging": false,
-    "m_SIGUID": 4852467144547585725,
+    "m_SIGUID": 7752199989574433778,
     "m_classType": "TextManipulationAction",
     "m_comment": "",
     "m_constraintList": [],
@@ -138,16 +140,16 @@
    },
    {
     "m_audioStream": 0,
-    "m_locale": "",
-    "m_pitch": 1.0,
+    "m_pitch": 2.0,
     "m_queue": true,
     "m_readNumbersIndividually": false,
+    "m_skipEmojis": true,
     "m_specifyAudioStream": false,
-    "m_speed": 1.0,
+    "m_speed": 1.5,
     "m_textToSay": "{not_title} says: {lv=short}",
     "m_waitToFinish": false,
     "disableLogging": false,
-    "m_SIGUID": 8944541710076131967,
+    "m_SIGUID": 7365078116116433130,
     "m_classType": "SpeakTextAction",
     "m_comment": "",
     "m_constraintList": [],
